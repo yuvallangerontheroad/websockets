@@ -34,7 +34,7 @@ On Unix systems, shutdown is usually triggered by sending a signal.
 
 Here's a full example for handling SIGTERM on Unix:
 
-.. literalinclude:: ../example/shutdown.py
+.. literalinclude:: ../example/shutdown_server.py
     :emphasize-lines: 13,17-19
 
 This example is easily adapted to handle other signals. If you override the
@@ -65,6 +65,8 @@ Memory usage of a single connection is the sum of:
 
 Baseline
 ........
+
+.. _compression-settings:
 
 Compression settings are the main factor affecting the baseline amount of
 memory used by each connection.

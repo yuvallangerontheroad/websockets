@@ -40,15 +40,104 @@ from .protocol import WebSocketCommonProtocol
 
 __all__ = ["connect", "unix_connect", "WebSocketClientProtocol"]
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("websockets.server")
 
 
 class WebSocketClientProtocol(WebSocketCommonProtocol):
     """
     :class:`~asyncio.Protocol` subclass implementing a WebSocket client.
 
-    This class inherits most of its methods from
-    :class:`~websockets.protocol.WebSocketCommonProtocol`.
+    :class:`WebSocketClientProtocol`:
+
+    * performs the opening handshake to establish the connection;
+    * provides :meth:`recv` and :meth:`send` coroutines for receiving and
+      sending messages;
+    * deals with control frames automatically;
+    * performs the closing handshake to terminate the connection.
+
+    :class:`WebSocketClientProtocol` supports asynchronous iteration::
+
+        async for message in websocket:
+            await process(message)
+
+    The iterator yields incoming messages. It exits normally when the
+    connection is closed with the close code 1000 (OK) or 1001 (going away).
+    It raises a :exc:`~websockets.exceptions.ConnectionClosedError` exception
+    when the connection is closed with any other code.
+
+    Once the connection is open, a `Ping frame`_ is sent every
+    ``ping_interval`` seconds. This serves as a keepalive. It helps keeping
+    the connection open, especially in the presence of proxies with short
+    timeouts on inactive connections. Set ``ping_interval`` to ``None`` to
+    disable this behavior.
+
+    .. _Ping frame: https://tools.ietf.org/html/rfc6455#section-5.5.2
+
+    If the corresponding `Pong frame`_ isn't received within ``ping_timeout``
+    seconds, the connection is considered unusable and is closed with
+    code 1011. This ensures that the remote endpoint remains responsive. Set
+    ``ping_timeout`` to ``None`` to disable this behavior.
+
+    .. _Pong frame: https://tools.ietf.org/html/rfc6455#section-5.5.3
+
+    The ``close_timeout`` parameter defines a maximum wait time for completing
+    the closing handshake and terminating the TCP connection. For legacy
+    reasons, :meth:`close` completes in at most ``5 * close_timeout`` seconds.
+
+    ``close_timeout`` needs to be a parameter of the protocol because
+    websockets usually calls :meth:`close` implicitly upon exit when
+    :func:`connect` is used as a context manager.
+
+    To apply a timeout to any other API, wrap it in :func:`~asyncio.wait_for`.
+
+    The ``max_size`` parameter enforces the maximum size for incoming messages
+    in bytes. The default value is 1 MiB. ``None`` disables the limit. If a
+    message larger than the maximum size is received, :meth:`recv` will
+    raise :exc:`~websockets.exceptions.ConnectionClosedError` and the
+    connection will be closed with code 1009.
+
+    The ``max_queue`` parameter sets the maximum length of the queue that
+    holds incoming messages. The default value is ``32``. ``None`` disables
+    the limit. Messages are added to an in-memory queue when they're received;
+    then :meth:`recv` pops from that queue. In order to prevent excessive
+    memory consumption when messages are received faster than they can be
+    processed, the queue must be bounded. If the queue fills up, the protocol
+    stops processing incoming data until :meth:`recv` is called. In this
+    situation, various receive buffers (at least in :mod:`asyncio` and in the
+    OS) will fill up, then the TCP receive window will shrink, slowing down
+    transmission to avoid packet loss.
+
+    Since Python can use up to 4 bytes of memory to represent a single
+    character, each connection may use up to ``4 * max_size * max_queue``
+    bytes of memory to store incoming messages. By default, this is 128 MiB.
+    You may want to lower the limits, depending on your application's
+    requirements.
+
+    The ``read_limit`` argument sets the high-water limit of the buffer for
+    incoming bytes. The low-water limit is half the high-water limit. The
+    default value is 64 KiB, half of asyncio's default (based on the current
+    implementation of :class:`~asyncio.StreamReader`).
+
+    The ``write_limit`` argument sets the high-water limit of the buffer for
+    outgoing bytes. The low-water limit is a quarter of the high-water limit.
+    The default value is 64 KiB, equal to asyncio's default (based on the
+    current implementation of ``FlowControlMixin``).
+
+    As soon as the HTTP request and response in the opening handshake are
+    processed:
+
+    * the request path is available in the :attr:`path` attribute;
+    * the request and response HTTP headers are available in the
+      :attr:`request_headers` and :attr:`response_headers` attributes,
+      which are :class:`~websockets.http.Headers` instances.
+
+    If a subprotocol was negotiated, it's available in the :attr:`subprotocol`
+    attribute.
+
+    Once the connection is closed, the code is available in the
+    :attr:`close_code` attribute and the reason in :attr:`close_reason`.
+
+    All attributes must be treated as read-only.
 
     """
 
@@ -318,8 +407,12 @@ class Connect:
     Awaiting :func:`connect` yields a :class:`WebSocketClientProtocol` which
     can then be used to send and receive messages.
 
-    :func:`connect` can also be used as a asynchronous context manager. In
-    that case, the connection is closed when exiting the context.
+    :func:`connect` can also be used as a asynchronous context manager::
+
+        async with connect(...) as websocket:
+            ...
+
+    In that case, the connection is closed when exiting the context.
 
     :func:`connect` is a wrapper around the event loop's
     :meth:`~asyncio.loop.create_connection` method. Unknown keyword arguments
@@ -336,31 +429,28 @@ class Connect:
     used in the TLS handshake for secure connections and in the ``Host`` HTTP
     header.
 
-    The ``create_protocol`` parameter allows customizing the
-    :class:`~asyncio.Protocol` that manages the connection. It should be a
-    callable or class accepting the same arguments as
-    :class:`WebSocketClientProtocol` and returning an instance of
-    :class:`WebSocketClientProtocol` or a subclass. It defaults to
-    :class:`WebSocketClientProtocol`.
+    ``create_protocol`` defaults to :class:`WebSocketClientProtocol`. It may
+    be replaced by a wrapper or a subclass to customize the protocol that
+    manages the connection.
 
     The behavior of ``ping_interval``, ``ping_timeout``, ``close_timeout``,
     ``max_size``, ``max_queue``, ``read_limit``, and ``write_limit`` is
-    described in :class:`~websockets.protocol.WebSocketCommonProtocol`.
+    described in :class:`WebSocketClientProtocol`.
 
     :func:`connect` also accepts the following optional arguments:
 
     * ``compression`` is a shortcut to configure compression extensions;
       by default it enables the "permessage-deflate" extension; set it to
-      ``None`` to disable compression
-    * ``origin`` sets the Origin HTTP header
+      ``None`` to disable compression.
+    * ``origin`` sets the Origin HTTP header.
     * ``extensions`` is a list of supported extensions in order of
-      decreasing preference
+      decreasing preference.
     * ``subprotocols`` is a list of supported subprotocols in order of
-      decreasing preference
+      decreasing preference.
     * ``extra_headers`` sets additional HTTP request headers; it can be a
       :class:`~websockets.http.Headers` instance, a
       :class:`~collections.abc.Mapping`, or an iterable of ``(name, value)``
-      pairs
+      pairs.
 
     :raises ~websockets.uri.InvalidURI: if ``uri`` is invalid
     :raises ~websockets.handshake.InvalidHandshake: if the opening handshake
@@ -374,7 +464,6 @@ class Connect:
         self,
         uri: str,
         *,
-        path: Optional[str] = None,
         create_protocol: Optional[Callable[[Any], WebSocketClientProtocol]] = None,
         ping_interval: Optional[float] = 20,
         ping_timeout: Optional[float] = 20,
@@ -384,9 +473,6 @@ class Connect:
         read_limit: int = 2 ** 16,
         write_limit: int = 2 ** 16,
         loop: Optional[asyncio.AbstractEventLoop] = None,
-        legacy_recv: bool = False,
-        klass: Optional[Type[WebSocketClientProtocol]] = None,
-        timeout: Optional[float] = None,
         compression: Optional[str] = "deflate",
         origin: Optional[Origin] = None,
         extensions: Optional[Sequence[ClientExtensionFactory]] = None,
@@ -395,6 +481,7 @@ class Connect:
         **kwargs: Any,
     ) -> None:
         # Backwards compatibility: close_timeout used to be called timeout.
+        timeout: Optional[float] = kwargs.pop("timeout", None)
         if timeout is None:
             timeout = 10
         else:
@@ -404,6 +491,7 @@ class Connect:
             close_timeout = timeout
 
         # Backwards compatibility: create_protocol used to be called klass.
+        klass: Optional[Type[WebSocketClientProtocol]] = kwargs.pop("klass", None)
         if klass is None:
             klass = WebSocketClientProtocol
         else:
@@ -411,6 +499,9 @@ class Connect:
         # If both are specified, klass is ignored.
         if create_protocol is None:
             create_protocol = klass
+
+        # Backwards compatibility: recv() used to return None on closed connections
+        legacy_recv: bool = kwargs.pop("legacy_recv", False)
 
         if loop is None:
             loop = asyncio.get_event_loop()
@@ -449,7 +540,12 @@ class Connect:
             extra_headers=extra_headers,
         )
 
-        if path is None:
+        if kwargs.pop("unix", False):
+            path: Optional[str] = kwargs.pop("path", None)
+            create_connection = functools.partial(
+                loop.create_unix_connection, factory, path, **kwargs
+            )
+        else:
             host: Optional[str]
             port: Optional[int]
             if kwargs.get("sock") is None:
@@ -462,10 +558,6 @@ class Connect:
             port = kwargs.pop("port", port)
             create_connection = functools.partial(
                 loop.create_connection, factory, host, port, **kwargs
-            )
-        else:
-            create_connection = functools.partial(
-                loop.create_unix_connection, factory, path, **kwargs
             )
 
         # This is a coroutine function.
@@ -561,7 +653,9 @@ class Connect:
 connect = Connect
 
 
-def unix_connect(path: str, uri: str = "ws://localhost/", **kwargs: Any) -> Connect:
+def unix_connect(
+    path: Optional[str], uri: str = "ws://localhost/", **kwargs: Any
+) -> Connect:
     """
     Similar to :func:`connect`, but for connecting to a Unix socket.
 
@@ -576,4 +670,4 @@ def unix_connect(path: str, uri: str = "ws://localhost/", **kwargs: Any) -> Conn
     :param uri: WebSocket URI
 
     """
-    return connect(uri=uri, path=path, **kwargs)
+    return connect(uri=uri, path=path, unix=True, **kwargs)

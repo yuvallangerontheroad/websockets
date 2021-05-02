@@ -3,6 +3,8 @@ Changelog
 
 .. currentmodule:: websockets
 
+.. _backwards-compatibility policy:
+
 Backwards-compatibility policy
 ..............................
 
@@ -11,7 +13,7 @@ Backwards-compatibility policy
 ``websockets`` also aims at providing the best API for WebSocket in Python.
 
 While we value stability, we value progress more. When an improvement requires
-changing the API, we make the change and document it below.
+changing a public API, we make the change and document it in this changelog.
 
 When possible with reasonable effort, we preserve backwards-compatibility for
 five years after the release that introduced the change.
@@ -20,31 +22,42 @@ When a release contains backwards-incompatible API changes, the major version
 is increased, else the minor version is increased. Patch versions are only for
 fixing regressions shortly after a release.
 
-9.0
+Only documented APIs are public. Undocumented APIs are considered private.
+They may change at any time.
+
+9.1
 ...
 
 *In development*
+
+9.0
+...
+
+*May 1, 2021*
 
 .. note::
 
     **Version 9.0 moves or deprecates several APIs.**
 
+    Aliases provide backwards compatibility for all previously public APIs.
+
     * :class:`~datastructures.Headers` and
       :exc:`~datastructures.MultipleValuesError` were moved from
-      ``websockets.http`` to :mod:`websockets.datastructures`.
+      ``websockets.http`` to :mod:`websockets.datastructures`. If you're using
+      them, you should adjust the import path.
 
-    * ``websockets.client``, ``websockets.server``, ``websockets.protocol``,
-      and ``websockets.auth`` were moved to :mod:`websockets.legacy.client`,
-      :mod:`websockets.legacy.server`, :mod:`websockets.legacy.protocol`, and
-      :mod:`websockets.legacy.auth` respectively.
+    * The ``client``, ``server``, ``protocol``, and ``auth`` modules were
+      moved from the ``websockets`` package to ``websockets.legacy``
+      sub-package, as part of an upcoming refactoring. Despite the name,
+      they're still fully supported. The refactoring should be a transparent
+      upgrade for most uses when it's available. The legacy implementation
+      will be preserved according to the `backwards-compatibility policy`_.
 
-    * ``websockets.handshake`` is deprecated.
-
-    * ``websockets.http`` is deprecated.
-
-    * ``websockets.framing`` is deprecated.
-
-    Aliases provide backwards compatibility for all previously public APIs.
+    * The ``framing``, ``handshake``, ``headers``, ``http``, and ``uri``
+      modules in the ``websockets`` package are deprecated. These modules
+      provided low-level APIs for reuse by other WebSocket implementations,
+      but that never happened. Keeping these APIs public makes it more
+      difficult to improve websockets for no actual benefit.
 
 * Added compatibility with Python 3.9.
 
@@ -59,7 +72,7 @@ fixing regressions shortly after a release.
 
 * Fixed ``Host`` header sent when connecting to an IPv6 address.
 
-* Fixed starting a Unix server listening on an existing socket.
+* Fixed creating a client or a server with an existing Unix socket.
 
 * Aligned maximum cookie size with popular web browsers.
 
